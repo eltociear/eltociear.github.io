@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Count the silence: three green monitors that were lying</title>
+<meta name="description" content="Three scheduled jobs reported success while doing nothing. The bug was never in the job — it was in what the monitor counted.">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="wrap">
+<header class="site">
+  <a href="../../">Ikko Eltociear Ashimine</a>
+  <nav><a href="../../">Posts</a><a href="https://github.com/eltociear">GitHub</a></nav>
+</header>
+
+<article>
+<p class="meta">16 August 2026 · monitoring</p>
+<h1>Count the silence: three green monitors that were lying</h1>
+<p class="lede">Three scheduled jobs reported success for weeks while doing nothing at all. In none of the three cases was the bug in the job. It was in what the monitor counted.</p>
+
+<p>I run an autonomous agent that keeps a few dozen scheduled jobs alive — crawlers, watchers, a forecasting bot that has to submit a prediction inside a three-hour window or lose the question forever. Losing a window costs real money, so the jobs are monitored. They were all green.</p>
+
+<p>Here are three that were green and wrong, what each one taught, and the twenty lines of Python I now put in front of anything that runs on a timer.</p>
+
+<h2>1. The tick that meant nothing</h2>
+
+<p>A GitHub Actions workflow ran every thirty minutes for weeks and passed every time. It had never once done its job. The forecasting step needed an API token that was documented as a required secret but only ever lived in a stale bundle, so the step hit a missing-credential branch that ended in <code>exit 0</code>:</p>
+
+<pre><code>if [ -z "$METACULUS_TOKEN" ]; then
+  echo "no token configured, skipping"
+  exit 0          # &lt;- this is the bug
+fi</code></pre>
+
+<p>An unconfigured bot is a broken bot, but <code>exit 0</code> says otherwise, and the green tick is precisely what stopped anyone from looking. A sibling workflow was worse. Its social-post step was an unquoted YAML scalar, so a fragment ending in <code>#agents #security" || true</code> had everything from the <code>#</code> stripped <em>as a YAML comment</em>. Bash received an unterminated quote and died on a parse error — early enough that the step's own <code>|| true</code> had been stripped too — which killed the three steps below it, including the one that saved state. That workflow had never saved state in its entire history. Underneath sat a second bug that could never surface: the job had no <code>permissions: contents: write</code>, so its push could only ever have returned 403, and the trailing <code>|| true</code> would have swallowed that as well.</p>
+
+<p>Three separate mechanisms — <code>exit 0</code>, <code>|| true</code>, <code>continue-on-error</code> — each of which converts a dead job into a silent one. The tell was runtime, not status: a healthy forecasting run does LLM work for minutes, and the broken one crashed in about thirty seconds. Nothing was watching runtime.</p>
+
+<div class="callout">
+<strong>Cheap check worth running today:</strong> diff the secrets your workflows <em>reference</em> against the ones that exist. <code>grep -rho 'secrets\.[A-Z_]*' .github/workflows | sort -u</code> against <code>gh secret list</code>. A referenced-but-unset secret is this bug already waiting.
+</div>
+
+<h2>2. The schedule that quietly halved itself</h2>
+
+<p>The cloud job was the backup. The primary was a Windows scheduled task firing every fifteen minutes. I hardened its settings one afternoon — and hardening them rebuilt the trigger. <code>StopAtDurationEnd</code> came back as <code>true</code> against an empty repetition duration, and the fifteen-minute cadence silently became roughly ninety. Five forecasting windows were skipped.</p>
+
+<p>Nothing reported it. The task's State read <code>Ready</code>. Every setting read back exactly as configured. Every run that <em>did</em> fire returned 0. A broken schedule and a healthy one are identical from every angle except the runs that never happened — and nothing was counting those.</p>
+
+<p>It was noticed only because the append-only log had stopped growing. That is the lesson in one line: <strong>the artefact that goes quiet when runs stop is the only honest sensor you have</strong>, whatever the cause — bad trigger, machine asleep, task disabled, script wedged. Count the silence, not the failures.</p>
+
+<h2>3. The alarm that measured one of two triggers</h2>
+
+<p>So I wrote a silence monitor. It read the job's log, computed the longest gap between runs in the last 24 hours, and alarmed when that gap exceeded the three-hour question lifetime. It was a real improvement — the metric everyone reaches for first is <em>time since the last run</em>, and that number reads perfectly healthy the moment the machine wakes up. Over 592 logged runs the difference was stark:</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Statistic over 592 runs</th><th>Value</th></tr></thead>
+<tbody>
+<tr><td>Mean gap</td><td class="num">0.77 h</td></tr>
+<tr><td>Median gap</td><td class="num">0.25 h</td></tr>
+<tr><td>Max gap</td><td class="num">31.80 h</td></tr>
+<tr><td>Gaps over the 3.0 h window</td><td class="num">29 of 591</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>A mean of 0.77 h and a median of 0.25 h describe a perfectly healthy scheduler. The tail is what loses questions, and there was a hole on almost every single day.</p>
+
+<p>Then the new alarm went red and stayed red. Every morning: <em>blind spot 9.51 h, any question that opened and closed in that hole is unreachable forever.</em> The measured cause was the desktop sleeping overnight, and the remedy the alarm itself printed was "cover it from the cloud or keep the machine awake."</p>
+
+<p>The cloud cover had shipped weeks earlier. I went and measured it — same 24 hours, from the Actions runs API rather than from the cron expression:</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Trigger</th><th>Fires in 26 h</th><th>Max gap</th></tr></thead>
+<tbody>
+<tr><td>Local 15-minute task</td><td class="num">—</td><td class="num">9.51 h</td></tr>
+<tr><td>Cloud <code>*/30</code> workflow</td><td class="num">43</td><td class="num">1.53 h</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>The cloud job runs the same submitting script over the same tournaments. A fire there covers a question exactly the way a local fire does. The last entry in the forecast ledger sat squarely inside the "hole." Nothing had been unreachable. The monitor was measuring one lane of a two-lane road and reporting the empty lane as a closed highway.</p>
+
+<p>That is a specific and repeatable failure, and it is worse than a missing alarm. A daily false red on the one thing guarding your most valuable process trains you to scroll past it.</p>
+
+<blockquote>When two independent mechanisms satisfy the same duty, a metric over one of them is not a weaker version of the truth. It is a different quantity — and the label on it ("coverage lost") is a claim about the union.</blockquote>
+
+<h3>The unit bug hiding inside the fix</h3>
+
+<p>Merging the two timelines has a trap in it. The local log is written by PowerShell's <code>Get-Date -Format s</code>, which is naive <em>local</em> time. The Actions API returns UTC. Concatenating them raw would have manufactured a nine-hour hole that was only a timezone — and it would have looked exactly like the bug I was trying to fix. In Python, a naive datetime's <code>.astimezone()</code> attaches the local zone, which is the one-call fix:</p>
+
+<pre><code>local = [datetime.fromisoformat(line.split()[0]).astimezone() for line in log]
+cloud = [datetime.fromisoformat(r["run_started_at"].replace("Z", "+00:00"))
+         for r in runs]
+merged = sorted(local + cloud)          # now they are the same quantity</code></pre>
+
+<h2>The watchdog</h2>
+
+<p>This is the whole pattern. It takes timestamps from every mechanism that satisfies the duty, and returns the longest silence — including the open-ended one that ends at <em>now</em>, because a scheduler that died an hour ago has no closing timestamp and would otherwise report its last healthy gap forever.</p>
+
+<pre><code>from datetime import datetime, timedelta, timezone
+
+def max_gap_h(stamps, hours=24):
+    """Longest silence in the last `hours`, across all triggers. None if unmeasurable."""
+    now = datetime.now(timezone.utc)
+    stamps = sorted(stamps)                       # all tz-aware
+    if len(stamps) &lt; 2:
+        return None
+    cut = now - timedelta(hours=hours)
+    recent = [t for t in stamps if t &gt;= cut]
+    before = [t for t in stamps if t &lt; cut]
+    if before:
+        recent.insert(0, before[-1])              # anchor, or a silence that
+    if len(recent) &lt; 2:                           # starts before the cutoff
+        return None                               # is invisible
+    gaps = [(b - a).total_seconds() / 3600
+            for a, b in zip(recent, recent[1:])]
+    gaps.append((now - recent[-1]).total_seconds() / 3600)   # the open gap
+    return round(max(gaps), 2)</code></pre>
+
+<p>Two details earn their lines. The <strong>anchor</strong>: without the last run from <em>before</em> the window, a silence that starts before the cutoff simply is not in the data — which is exactly the overnight hole the function exists to catch. And the <strong>open gap</strong>: without it, a dead scheduler reports the last healthy interval it managed.</p>
+
+<p>Then alarm against the thing you actually lose, not against a round number:</p>
+
+<pre><code>WINDOW_H = 3.0        # a question is open for exactly this long
+
+gap = max_gap_h(local_stamps + cloud_stamps)
+if gap and gap &gt; WINDOW_H:
+    alert(f"blind spot {gap}h across BOTH triggers — check Actions quota "
+          f"and the local task")</code></pre>
+
+<h2>Three questions for any monitor</h2>
+
+<ol>
+<li><strong>Does a green result require work to have happened?</strong> If the job can pass by skipping, it will, and you will learn nothing for weeks. Make the unconfigured case fail loudly. Track runtime, not just status.</li>
+<li><strong>Am I watching the mean or the tail?</strong> If the thing you lose has a deadline, the mean cannot see the loss. Alarm on the max gap against that deadline.</li>
+<li><strong>Does my denominator cover every mechanism that does this job?</strong> List them before you write the query. If two things can satisfy the duty, a metric over one is a different quantity with a misleading name.</li>
+</ol>
+
+<p>The last one is the general form of all three. Every failure above was a monitor whose number was accurate and whose label was a claim about something it had never measured. Green is not a fact about your system. It is a fact about your query.</p>
+
+<hr>
+<p class="meta">All numbers here are measured from the repository this describes — a long-running autonomous agent operation. The watchdog above is the one now running.</p>
+</article>
+
+<footer class="site">
+  <a href="../../">← All posts</a> · <a href="https://github.com/eltociear">github.com/eltociear</a>
+</footer>
+</div>
+</body>
+</html>

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Measure it to the payout address</title>
+<meta name="description" content="Every claim we had about demand for an autonomous agent's services came from a request log. Then we counted the money. Four of the numbers were wrong, including the ones in our own favour.">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="wrap">
+<header class="site">
+  <a href="../../">Ikko Eltociear Ashimine</a>
+  <nav><a href="../../">Posts</a><a href="https://github.com/eltociear">GitHub</a></nav>
+</header>
+
+<article>
+<p class="meta">16 August 2026 · measurement</p>
+<h1>Measure it to the payout address</h1>
+<p class="lede">Every claim we had about demand for an autonomous agent's services came from a request log. Then we counted the money that actually moved. Four numbers were wrong — including the ones in our own favour.</p>
+
+<p>For several months I have run an agent whose job is to earn: it registers on marketplaces, publishes paid API routes, enters bounty boards, ships tools. It keeps a written ledger of what it believes about each lane. Recently I audited the ledger instead of the lanes, and found that the measurement layer had been quietly manufacturing conclusions for months.</p>
+
+<p>None of this is about crypto in particular. It is about a distinction that applies to any product with an API: <strong>a request log answers "how many calls." Only the payment rail answers "who paid, how much, and was it us."</strong> We had been asking the first question and writing down answers to the second.</p>
+
+<h2>The phantom customer</h2>
+
+<p>We publish a handful of pay-per-call HTTP endpoints. The internal report on them said, in bold:</p>
+
+<blockquote>One client is 100% of paid volume — this is a customer, not a market.</blockquote>
+
+<p>Strategy followed from that sentence for weeks. Package for the whale. Price to the whale. Do not build a shelf nobody browses.</p>
+
+<p>The sentence came from a log buffer roughly two days deep that happened to contain exactly one call, compared against an all-time counter of 512. Two denominators differing by orders of magnitude, divided, and read as a market share.</p>
+
+<p>So I wrote a census that walks every inbound transfer to the receiving address and splits it by sender. Forty-five days, 566 transfers:</p>
+
+<pre><code>SELF   (bootstrap payer)   156 settles   $3.21    28% of calls, 59% of the DOLLARS
+EXTERNAL                   410 settles   $2.19    from 124 DISTINCT addresses
+
+external amounts:   $0.005 x392     $0.010 x13     $0.020 x5</code></pre>
+
+<p>Three recorded beliefs died at once.</p>
+
+<p><strong>It was never one buyer.</strong> 124 distinct external addresses paid us in 45 days. The whale is real — it is still the single largest payer at 158 settles — but it is one of 124, not the market.</p>
+
+<p><strong>Our price ceiling was our own ask.</strong> The ledger said demand collapsed above half a cent. Eighteen settles landed above it, and in the most recent fortnight 38% of external payments were above the "ceiling," four of them at four times it. The receipts had been on-chain the whole time; nobody had gone and read them.</p>
+
+<p><strong>Most of the money was ours.</strong> Self-payments — a bootstrap payer used to smoke-test the paywall — were 59% of the dollars sitting in the wallet. Every headline number that did not exclude that address overstated external revenue by about 2.5×.</p>
+
+<p>That last one deserves its own name, because it recurs. <em>Third-party traction that counts your own money is not traction.</em> We hit the identical bug on a completely different platform: a marketplace dashboard showed 52 runs of our tools in 30 days, and our own summary line proudly reported "52 external runs." It had computed that as total runs minus our own — which counts nobody. Attribution was available the whole time: every run object carries a user ID. Grouping by it gave the real answer, which was that the distinct-user count for the month was <strong>1</strong>, and that 1 was us. Lifetime revenue, $0.00.</p>
+
+<div class="callout">
+The tell in both cases is the same: a metric defined by <em>subtracting</em> a known quantity from a total, rather than by <em>counting</em> the thing it claims to count. Subtraction survives having no attribution at all. That is exactly why it is the formula you reach for, and exactly why it lies.
+</div>
+
+<h2>Ranking lanes by what leaves the payout address</h2>
+
+<p>The generalisation is a method, and it is cheap. For any platform that claims to pay, do not read the T&amp;Cs or the funding announcement. Find the address it pays <em>from</em> — usually recoverable from the project's own deploy records — and measure the flow: total out, recipient count, <strong>median per recipient</strong>, and recency. The median is the number that decides whether the lane is enterable; a pool paying six figures to three insiders is not a lane.</p>
+
+<p>Six lanes, measured this way in a single afternoon:</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Lane</th><th>What the payout address shows</th><th>Reality</th></tr></thead>
+<tbody>
+<tr><td>Ecosystem builder rewards</td><td>~5 ETH split across ~500 builders/month</td><td><strong>$8–115/mo</strong> — the only one that paid</td></tr>
+<tr><td>Selling paid API routes</td><td>$4,047/day of volume, 96.6% to one gateway</td><td>~$0</td></tr>
+<tr><td>A funded grants escrow</td><td>$16,953 parked, $0 moved in 62 days</td><td>$0</td></tr>
+<tr><td>An on-chain bounty board</td><td>last payout 239 days ago, median claim ~$6</td><td>$0</td></tr>
+<tr><td>~30 agent marketplaces</td><td>$0.00</td><td>$0</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Reading the transfer log killed four candidate lanes in a day and stopped a fifth from being built. Nothing we have measured supports a headless service earning more than roughly $10–100 a month — which is a disappointing conclusion, and a far more useful one than the ledger's previous position, which was a plan.</p>
+
+<h2>Bounty boards: the prize is not the number you need</h2>
+
+<p>The same discipline applies to work, not just revenue. Agent task boards advertise a reward, and the reward is the only figure in the feed. On a live board this week:</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Task</th><th>Prize</th><th>Submissions</th><th>Expected value</th></tr></thead>
+<tbody>
+<tr><td>Build a browser game (single HTML file)</td><td class="num">$100</td><td class="num">188</td><td class="num">$0.53</td></tr>
+<tr><td>Market research report</td><td class="num">$20</td><td class="num">17</td><td class="num">$1.18</td></tr>
+<tr><td>Ship an integration PR</td><td class="num">$4.50</td><td class="num">148</td><td class="num">$0.03</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>These are winner-take-all. The largest prize was the worst bet by more than 2×, and it was also the most work. The submission count was a single unauthenticated GET the whole time — the denominator was free, public, and absent from every alert we had written. Our watcher now fetches it and ranks the board by prize over rivals rather than by prize.</p>
+
+<h2>The three rules that came out of it</h2>
+
+<ol>
+<li><strong>Before believing any demand number, ask where it came from.</strong> Logs answer "how many requests." Only the payment rail answers "who paid, how much, and was it us." If a number about money came from a log, it is a hypothesis.</li>
+<li><strong>Distrust any metric defined by subtraction.</strong> "Total minus ours" reports a population it never observed. Group by an identifier or admit you do not know.</li>
+<li><strong>Check the denominators are the same size before dividing.</strong> A two-day buffer over an all-time counter produced a market share, a strategy, and weeks of work aimed at one address.</li>
+</ol>
+
+<p>The uncomfortable part is that all four corrections were available at zero cost, in public data, the entire time. The obstacle was never access. It was that the numbers already in the ledger looked like measurements — they had units, they had precision, they were produced by scripts we wrote — and none of them had ever been checked against the money.</p>
+
+<hr>
+<p class="meta">Figures are from the operation's own census scripts and public chain and platform APIs, measured July–August 2026. The census walks a 45-day window in about 76 seconds; counts are a floor, since refused RPC ranges are reported rather than silently dropped.</p>
+</article>
+
+<footer class="site">
+  <a href="../../">← All posts</a> · <a href="https://github.com/eltociear">github.com/eltociear</a>
+</footer>
+</div>
+</body>
+</html>

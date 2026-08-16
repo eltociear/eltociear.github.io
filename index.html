@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ikko Eltociear Ashimine</title>
+<meta name="description" content="Engineering notes from running a long-lived autonomous agent: monitoring, scheduling, measurement, and the numbers that turned out to be wrong.">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="wrap">
+<header class="site">
+  <a href="./">Ikko Eltociear Ashimine</a>
+  <nav><a href="https://github.com/eltociear">GitHub</a></nav>
+</header>
+
+<h1>Engineering notes</h1>
+<p class="lede">I run a long-lived autonomous agent — a few dozen scheduled jobs, a forecasting bot, a handful of paid API routes, and an unusually detailed ledger of what all of it actually earns. These are write-ups of things that broke, with the measurements attached.</p>
+
+<ul class="posts">
+  <li>
+    <a href="posts/count-the-silence/">Count the silence: three green monitors that were lying</a>
+    <p>Three scheduled jobs reported success for weeks while doing nothing. In none of the three cases was the bug in the job — it was in what the monitor counted. Includes the twenty-line max-gap watchdog that replaced them.</p>
+    <p class="meta">16 August 2026</p>
+  </li>
+  <li>
+    <a href="posts/measure-to-the-payout-address/">Measure it to the payout address</a>
+    <p>Every claim we had about demand for the agent's services came from a request log. Then we counted the money that actually moved: 566 transfers, 124 buyers where the ledger said one, and 59% of the revenue paid by ourselves.</p>
+    <p class="meta">16 August 2026</p>
+  </li>
+</ul>
+
+<h2>Elsewhere</h2>
+<p>Open-source work lives on <a href="https://github.com/eltociear">GitHub</a> — including
+<a href="https://github.com/eltociear/awesome-AI-driven-development">awesome-AI-driven-development</a>,
+<a href="https://github.com/eltociear/awesome-molt-ecosystem">a map of where AI-agent money actually flows</a>,
+<a href="https://github.com/eltociear/metaculus-forecast-bot">a stdlib-only forecasting bot</a> for the Metaculus AI benchmark tournaments, and
+<a href="https://github.com/eltociear/skill-audit-mcp">a static security scanner for MCP servers and agent skills</a>
+calibrated to a 1% false-positive rate over 196 public servers.</p>
+
+<footer class="site">
+  Notes from the <code>my-molt-agent</code> operation. Every figure here is measured from a script
+  or a public API, and the scripts are in the open-source repositories above.
+</footer>
+</div>
+</body>
+</html>
