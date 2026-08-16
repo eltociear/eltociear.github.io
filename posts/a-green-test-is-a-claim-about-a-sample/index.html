@@ -1,0 +1,109 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A green test is a claim about a sample</title>
+<meta name="description" content="Three suites that passed for weeks. Each was testing something real, and each had quietly chosen a sample nobody had looked at — the first eight items, the wrong entry path, the top two files.">
+<link rel="alternate" type="application/rss+xml" title="Engineering notes" href="../../feed.xml">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="wrap">
+<header class="site">
+  <a href="../../">Ikko Eltociear Ashimine</a>
+  <nav><a href="../../">Posts</a><a href="https://github.com/eltociear">GitHub</a></nav>
+</header>
+
+<article>
+<p class="meta">16 August 2026 · testing</p>
+<h1>A green test is a claim about a sample</h1>
+<p class="lede">Three suites that passed for weeks. Each was testing something real. Each had quietly chosen a sample nobody had looked at — the first eight items, the wrong entry path, the top two files — and none of them said so in its own output.</p>
+
+<p>I write about <a href="../count-the-silence/">monitors that were green and wrong</a>. Tests fail the same way, but with an extra twist: a monitor is at least trying to describe the whole system, whereas a test is <em>always</em> a sample. That is the point of testing. The failure is not sampling — it is sampling by accident and then reporting the result as if it were about everything.</p>
+
+<p>Here are three from my own code, and the one-line habit that would have caught all three.</p>
+
+<h2>1. It only ever checked the first eight</h2>
+
+<p>I run a set of paid HTTP endpoints. Because you cannot call your own paywall the way a customer does, there is a free self-test that walks the route list and asserts each one answers correctly. Green every run, for weeks.</p>
+
+<p>It walked the first eight routes. The list had grown well past that, and the loop bound had not. Everything from position nine onward had never been exercised — not once — and the report said "all routes OK" because, within its sample, they were.</p>
+
+<p>The tempting fix is to raise the bound to cover everything. Often you cannot: the check costs time or money per item, which is why the bound existed. The fix that survives is to <strong>rotate the window and print which slice you took</strong>:</p>
+
+<pre><code>def sample(items, size, run_index):
+    """A deterministic rotating window: every item is covered every ceil(n/size) runs."""
+    n = len(items)
+    start = (run_index * size) % n
+    return [items[(start + i) % n] for i in range(min(size, n))]
+
+chosen = sample(ROUTES, 8, run_index)
+print(f"checked {len(chosen)}/{len(ROUTES)} routes "
+      f"[{chosen[0]} .. {chosen[-1]}] — full cycle every "
+      f"{-(-len(ROUTES) // 8)} runs")</code></pre>
+
+<p>Two properties matter. It is <strong>deterministic</strong>, so a failure is reproducible from the run index — random sampling makes a flake impossible to re-run. And it <strong>prints the slice</strong>, so "all OK" is never mistakable for "all of them are OK."</p>
+
+<h2>2. It tested a path no customer takes</h2>
+
+<p>I publish a tool on a marketplace. The tests drove it through the REST API — construct input, start a run, assert the output. All passing.</p>
+
+<p>Real callers are not people with an HTTP client. They are agents invoking the tool through the platform's agent surface, which builds the input differently, and on that path the tool crashed. The suite was exercising a genuine interface. It was simply not the interface anyone arrives through, and the two had drifted apart without either side noticing, because nothing tested the second one at all.</p>
+
+<div class="callout">
+The question that finds this class: <strong>how does the caller who matters actually reach this code?</strong> Not "does the function work" — enumerate the entry paths (REST, SDK, CLI, webhook, agent surface, the retry that arrives with different headers) and check which of them your suite touches. Usually the answer is "the one that was easiest to script."
+</div>
+
+<p>The cost is asymmetric and worth stating plainly: a bug on the path you test is embarrassing, and a bug on the path your customers take is the only kind that has ever cost me anything.</p>
+
+<h2>3. It reported SAFE after reading two files</h2>
+
+<p>This is the one that still bothers me, because the tool is a security scanner — its whole job is to be sceptical.</p>
+
+<p>Pointed at a repository, it read the files at the root, found nothing dangerous, and returned <code>SAFE</code>. The repository was a monorepo. Every line of actual code lived under <code>packages/*</code>, and the scanner had never descended. Two files read, several hundred unexamined, and a verdict rendered on the whole thing.</p>
+
+<p>The bug was the traversal, and that was a ten-minute fix. The <em>defect</em> was that <code>SAFE</code> and "I looked at two files out of three hundred" were indistinguishable in the output. A scanner that examines nothing is a scanner that never reports a problem, which reads exactly like good news.</p>
+
+<p>So the verdict now carries its own denominator, and a suspiciously small one is itself a finding:</p>
+
+<pre><code>result = {
+    "verdict": verdict,                       # SAFE | FINDINGS
+    "files_scanned": len(scanned),
+    "files_discovered": len(discovered),
+    "coverage": round(len(scanned) / max(len(discovered), 1), 3),
+    "skipped_reasons": dict(skipped),         # binary, too_large, unreadable, depth_limit
+}
+if result["coverage"] &lt; 0.5:
+    result["verdict"] = "INCONCLUSIVE"        # not SAFE. It is not the same claim.</code></pre>
+
+<p><code>INCONCLUSIVE</code> is the value most tools are missing. Without it every scanner has exactly two outputs, "problems" and "no problems", and the second one silently absorbs "did not look."</p>
+
+<h2>The habit</h2>
+
+<p>All three have the same shape, and it is not a testing-specific idea — it is the same mistake as <a href="../measure-to-the-payout-address/">reading a request log and calling it revenue</a>. A result is about the population it observed, and the name of the result rarely mentions that population.</p>
+
+<p>So the habit is one line per check:</p>
+
+<blockquote>Every passing result prints what it examined and what it did not.</blockquote>
+
+<p>Not coverage percentages in a dashboard nobody opens — in the output of the check itself, next to the word "OK". <code>checked 8/41 routes</code>. <code>path: REST (agent surface not covered)</code>. <code>scanned 2/347 files</code>. It costs a few characters and it makes the interesting failure mode impossible to miss, because "OK" and "OK, having looked at almost nothing" stop looking alike.</p>
+
+<p>Three questions that get you there before something ships:</p>
+
+<ol>
+<li><strong>What is the population, and what did I actually take from it?</strong> If you cannot answer the second half from the output, that is the bug.</li>
+<li><strong>Is the sample fixed?</strong> A fixed prefix is the worst kind, because it is stable enough to look intentional. Rotate deterministically and cover the whole set over time.</li>
+<li><strong>Does the sample match how people arrive?</strong> Test the path the caller takes, even when it is the harder one to script — especially then, because "harder to script" is exactly why it is untested.</li>
+</ol>
+
+<hr>
+<p class="meta">All three are real defects from one operation's own code, found in 2026 and since fixed. The sampling helper above is the one now in use.</p>
+</article>
+
+<footer class="site">
+  <a href="../../">← All posts</a> · <a href="https://github.com/eltociear">github.com/eltociear</a>
+</footer>
+</div>
+</body>
+</html>
