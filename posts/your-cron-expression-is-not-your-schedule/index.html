@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Your cron expression is not your schedule</title>
+<meta name="description" content="An hourly job delivered 11.3 runs a day. Every cost estimate and every coverage guarantee I had was derived from the cron expression, and the cron expression is a request.">
+<link rel="stylesheet" href="../../style.css">
+</head>
+<body>
+<div class="wrap">
+<header class="site">
+  <a href="../../">Ikko Eltociear Ashimine</a>
+  <nav><a href="../../">Posts</a><a href="https://github.com/eltociear">GitHub</a></nav>
+</header>
+
+<article>
+<p class="meta">16 August 2026 · scheduling</p>
+<h1>Your cron expression is not your schedule</h1>
+<p class="lede">An hourly job delivered 11.3 runs a day. Every cost estimate and every coverage guarantee I had was derived from the cron expression — and the cron expression is a request, not a promise.</p>
+
+<p>I have a job that must run often enough to catch tasks that are only open for three hours. It was scheduled hourly. Three runs inside every window, comfortable margin, done.</p>
+
+<p>Then I stopped reading the schedule and asked the runs API what had actually happened. Over 36 hours:</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Job</th><th>Nominal</th><th>Measured</th><th>Delivery</th></tr></thead>
+<tbody>
+<tr><td>Forecast job</td><td class="num">24 /day</td><td class="num">11.3 /day</td><td class="num">47%</td></tr>
+<tr><td>Watcher A</td><td class="num">24 /day</td><td class="num">0.7 /day</td><td class="num">3%</td></tr>
+<tr><td>Watcher B</td><td class="num">24 /day</td><td class="num">0.7 /day</td><td class="num">3%</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>Hosted schedulers drop fires under load, and they do it silently — the run list just shows successes, further apart. Nothing is marked missing, because from the platform's point of view nothing failed. It is documented behaviour on GitHub Actions and it has analogues everywhere: a queue that coalesces, a worker pool that was saturated at the trigger instant, a container that was cold.</p>
+
+<p>Two things I had built on top of the cron expression were therefore wrong, and they were wrong in opposite directions.</p>
+
+<h2>The cost estimate was nearly double</h2>
+
+<p>The repository is private, so runs bill against a monthly minute budget, and every run bills a rounded-up minute regardless of how short it is. My budget arithmetic said "hourly, so 24 runs a day, so about 1,800 minutes a month" — a number that had shaped which other jobs were allowed to exist. The measured figure was 1,380. I had been rationing against a ceiling I was never touching.</p>
+
+<p>The correction is to cost from run records:</p>
+
+<pre><code>gh api "repos/OWNER/REPO/actions/workflows/JOB.yml/runs?per_page=100" \
+  --jq '.workflow_runs[] | [.event, .run_started_at, .updated_at] | @tsv'</code></pre>
+
+<p>Count only <code>event == "schedule"</code>. A manual dispatch proves the job works; it says nothing about whether the timer fires, and letting one into the sample hides exactly the failure you are looking for.</p>
+
+<h2>The coverage guarantee was fiction</h2>
+
+<p>This is the direction that costs money. Averages looked fine; the tail did not:</p>
+
+<div class="tablewrap">
+<table>
+<thead><tr><th>Cadence</th><th>Median gap</th><th>Max gap</th><th>Versus a 3.0 h window</th></tr></thead>
+<tbody>
+<tr><td>Hourly</td><td class="num">1.82 h</td><td class="num">3.61 h</td><td>a window could pass with zero runs</td></tr>
+<tr><td>Every 30 min</td><td class="num">0.48 h</td><td class="num">1.53 h</td><td>3–4 runs inside every window</td></tr>
+</tbody>
+</table>
+</div>
+
+<p>A 3.61-hour gap against a 3.0-hour window means a task could open and close without a single run ever seeing it. No error is raised, no alert fires, and afterwards the task is simply gone — coverage of currently-open tasks still reads 100%, because the one you missed is not open any more. <strong>The metric to design against is the max gap versus the lifetime of the thing you are trying to catch</strong>, and it is invisible to every average you have.</p>
+
+<div class="callout">
+A three-hour cadence against a three-hour window survives only on phase. Any delivery jitter at all — and there is always delivery jitter — turns "always covered" into "usually covered", which is a different product.
+</div>
+
+<h2>The delivery ratio is not a constant</h2>
+
+<p>Here is the part that surprised me, and the reason this cannot be fixed with a fudge factor. After moving to every 30 minutes I measured again over 26 hours: 43 scheduled fires, a nominal 52. That is <strong>83% delivery, against 47% at hourly</strong> on the same repository, same week, same platform.</p>
+
+<p>So the drop rate is not a property of the account that you can measure once and multiply by. Whatever the scheduler is doing — batching, deduplicating near-simultaneous fires, deprioritising by recent usage — it responds to the requested cadence in a way that is not linear and is not documented. Any formula of the form <em>nominal × my_observed_ratio</em> is another estimate dressed as a measurement.</p>
+
+<p>Which leaves one honest procedure:</p>
+
+<ol>
+<li><strong>Decide the deadline.</strong> How long does the thing you must catch stay catchable? That number, not a round one, is the requirement.</li>
+<li><strong>Ship a cadence and measure what arrived.</strong> Pull the run history, compute the gap distribution, and look at the maximum.</li>
+<li><strong>Compare the max gap to the deadline, not the median.</strong> If the max exceeds it, the schedule does not meet the requirement, however good the average looks.</li>
+<li><strong>Re-measure after every change.</strong> Including changes that only look like they make things better — the delivery ratio moved by 36 points when the cadence changed.</li>
+<li><strong>Cost from the same data.</strong> Runs actually delivered × billable minutes each, never fires-per-day × anything.</li>
+</ol>
+
+<h2>Two triggers beats a faster one</h2>
+
+<p>The change that actually fixed coverage was not a smaller interval. It was a second, independent trigger on a completely different mechanism — a local scheduled task alongside the hosted cron. The two fail for unrelated reasons: the hosted one drops fires under load, the local one stops when the machine sleeps. Their union has no hole where either alone does.</p>
+
+<p>That brings one obligation with it, which I learned by getting it wrong. <strong>Once two mechanisms satisfy the duty, every metric about coverage has to be computed over both of them.</strong> My gap monitor kept reading one log and reported a nine-hour blind spot, daily, for a period the other trigger had covered at a 1.53-hour maximum gap. An alarm that is red every morning for a problem that does not exist is worse than no alarm; you train yourself past it in about a week.</p>
+
+<p>Merging them has one trap worth naming. Local schedulers usually write local time; hosted APIs return UTC. Concatenating those two lists raw manufactures a gap the size of your timezone offset, and it looks precisely like the outage you were hunting.</p>
+
+<hr>
+<p class="meta">Measurements are from one private repository's Actions history and a local task log, July–August 2026, pulled with the runs API rather than read off the cron expression.</p>
+</article>
+
+<footer class="site">
+  <a href="../../">← All posts</a> · <a href="https://github.com/eltociear">github.com/eltociear</a>
+</footer>
+</div>
+</body>
+</html>
