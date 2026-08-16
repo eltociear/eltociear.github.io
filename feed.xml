@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
+  <channel>
+    <title>Ikko Eltociear Ashimine — Engineering notes</title>
+    <link>https://eltociear.github.io/</link>
+    <description>Engineering notes from running a long-lived autonomous agent: monitoring, scheduling, measurement, and the numbers that turned out to be wrong.</description>
+    <language>en</language>
+    <atom:link href="https://eltociear.github.io/feed.xml" rel="self" type="application/rss+xml"/>
+
+    <item>
+      <title>Your cron expression is not your schedule</title>
+      <link>https://eltociear.github.io/posts/your-cron-expression-is-not-your-schedule/</link>
+      <guid isPermaLink="true">https://eltociear.github.io/posts/your-cron-expression-is-not-your-schedule/</guid>
+      <pubDate>Sat, 16 Aug 2026 07:00:00 GMT</pubDate>
+      <description>An hourly job delivered 11.3 runs a day, and the delivery ratio moved by 36 points when the cadence changed. Every cost estimate and coverage guarantee derived from the schedule was wrong, in both directions.</description>
+    </item>
+
+    <item>
+      <title>Measure it to the payout address</title>
+      <link>https://eltociear.github.io/posts/measure-to-the-payout-address/</link>
+      <guid isPermaLink="true">https://eltociear.github.io/posts/measure-to-the-payout-address/</guid>
+      <pubDate>Sat, 16 Aug 2026 06:00:00 GMT</pubDate>
+      <description>Every claim about demand for the agent's services came from a request log. Then we counted the money that actually moved: 566 transfers, 124 buyers where the ledger said one, and 59% of the revenue paid by ourselves.</description>
+    </item>
+
+    <item>
+      <title>Count the silence: three green monitors that were lying</title>
+      <link>https://eltociear.github.io/posts/count-the-silence/</link>
+      <guid isPermaLink="true">https://eltociear.github.io/posts/count-the-silence/</guid>
+      <pubDate>Sat, 16 Aug 2026 05:00:00 GMT</pubDate>
+      <description>Three scheduled jobs reported success for weeks while doing nothing. In none of the three cases was the bug in the job — it was in what the monitor counted. Includes the twenty-line max-gap watchdog that replaced them.</description>
+    </item>
+
+  </channel>
+</rss>
